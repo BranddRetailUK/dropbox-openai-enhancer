@@ -7,11 +7,11 @@
     "start": "node src/server.js"
   },
   "dependencies": {
+    "crypto": "^1.0.1",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "openai": "^4.56.0",
-    "p-queue": "^8.0.1",
     "dropbox": "^10.34.0",
-    "crypto": "^1.0.1"
+    "express": "^4.19.2",
+    "openai": "^4.104.0",
+    "p-queue": "^8.0.1"
   }
 }

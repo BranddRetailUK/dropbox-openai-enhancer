@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import crypto from 'crypto';
 import { processDropboxDelta } from './processor.js';
-import { getDropboxClient } from './dropbox.js';
+import { getDropboxClient, getDropboxAuthMode } from './dropbox.js';
 
 const app = express();
 
@@ -83,8 +83,9 @@ app.listen(port, async () => {
     const dbx = getDropboxClient();
     const account = await dbx.usersGetCurrentAccount();
     const email = account?.result?.email || 'unknown';
+    const authMode = getDropboxAuthMode();
     console.log(`🔐 [startup] connected dropboxAccount=${oneLine(email)}`);
-    console.log(`🚀 [startup] server running port=${port}`);
+    console.log(`🚀 [startup] server running port=${port} dropboxAuth=${authMode}`);
   } catch (err) {
     console.error(`❌ [startup] bootstrap failed error="${formatError(err)}"`);
     process.exit(1);
@@ -120,10 +121,45 @@ function extractAccountsCount(rawBody) {
 }
 
 function formatError(err) {
+  const details = extractDropboxErrorDetails(err);
+  if (details) return details;
   if (err instanceof Error) return oneLine(`${err.name}: ${err.message}`);
   return oneLine(String(err));
 }
 
 function oneLine(value) {
   return String(value).replace(/\s+/g, ' ').trim();
+}
+
+function extractDropboxErrorDetails(err) {
+  if (!err || typeof err !== 'object') return '';
+
+  const status = err?.status || err?.response?.status;
+  const name = err?.name ? String(err.name) : 'DropboxError';
+  const message = err?.message ? oneLine(err.message) : '';
+  const summary = readFirstString([
+    err?.error?.error_summary,
+    err?.error?.error?.error_summary,
+    err?.error?.reason?.error_summary,
+    err?.response?.result?.error_summary
+  ]);
+  const tag = readFirstString([
+    err?.error?.['.tag'],
+    err?.error?.error?.['.tag'],
+    err?.error?.reason?.['.tag'],
+    err?.response?.result?.error?.['.tag']
+  ]);
+
+  if (!status && !summary && !tag && !String(name).includes('Dropbox')) return '';
+
+  return oneLine(
+    `${name}: ${message}${status ? ` status=${status}` : ''}${summary ? ` summary=${summary}` : ''}${tag ? ` tag=${tag}` : ''}`
+  );
+}
+
+function readFirstString(candidates) {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return oneLine(candidate);
+  }
+  return '';
 }

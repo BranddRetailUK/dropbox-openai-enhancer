@@ -140,8 +140,11 @@ async function handleOne(dbx, pathLower, reqId) {
 
   // 2) Edit with OpenAI
   const filename = pathLower.split('/').pop() || 'input.png';
-  const editedBuf = await editImageWithOpenAI(inputBuf, filename);
-  console.log(`🧠 [job] reqId=${reqId} enhanced path=${pathLower} bytes=${editedBuf.length}`);
+  const edited = await editImageWithOpenAI(inputBuf, filename);
+  const editedBuf = edited.buffer;
+  console.log(
+    `🧠 [job] reqId=${reqId} enhanced path=${pathLower} model=${edited.model} endpoint=${edited.endpoint}${edited.responseModel ? ` responsesModel=${edited.responseModel}` : ''} bytes=${editedBuf.length}`
+  );
 
   // 3) Upload to OUTPUT
   const outPath = buildOutputPath(pathLower);
@@ -157,10 +160,45 @@ function isPathInsideInput(pathLower, inputPathLower) {
 }
 
 function formatError(err) {
+  const details = extractDropboxErrorDetails(err);
+  if (details) return details;
   if (err instanceof Error) return oneLine(`${err.name}: ${err.message}`);
   return oneLine(String(err));
 }
 
 function oneLine(value) {
   return String(value).replace(/\s+/g, ' ').trim();
+}
+
+function extractDropboxErrorDetails(err) {
+  if (!err || typeof err !== 'object') return '';
+
+  const status = err?.status || err?.response?.status;
+  const name = err?.name ? String(err.name) : 'DropboxError';
+  const message = err?.message ? oneLine(err.message) : '';
+  const summary = readFirstString([
+    err?.error?.error_summary,
+    err?.error?.error?.error_summary,
+    err?.error?.reason?.error_summary,
+    err?.response?.result?.error_summary
+  ]);
+  const tag = readFirstString([
+    err?.error?.['.tag'],
+    err?.error?.error?.['.tag'],
+    err?.error?.reason?.['.tag'],
+    err?.response?.result?.error?.['.tag']
+  ]);
+
+  if (!status && !summary && !tag && !String(name).includes('Dropbox')) return '';
+
+  return oneLine(
+    `${name}: ${message}${status ? ` status=${status}` : ''}${summary ? ` summary=${summary}` : ''}${tag ? ` tag=${tag}` : ''}`
+  );
+}
+
+function readFirstString(candidates) {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return oneLine(candidate);
+  }
+  return '';
 }
