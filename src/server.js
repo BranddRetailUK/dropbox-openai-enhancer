@@ -20,39 +20,75 @@ app.use((req, res, next) => {
 // 1) Verification handshake (GET) – Dropbox sends a challenge
 app.get('/dropbox/webhook', (req, res) => {
   const challenge = req.query.challenge;
-  if (!challenge) return res.status(400).send('Missing challenge');
+  if (!challenge) {
+    console.warn('⚠️ [webhook] verification failed challenge missing');
+    return res.status(400).send('Missing challenge');
+  }
+  console.log('🤝 [webhook] verification challenge received');
   res.status(200).send(challenge);
 });
 
 // 2) Webhook events (POST) – verify signature then process delta
-app.post('/dropbox/webhook', async (req, res) => {
+app.post('/dropbox/webhook', (req, res) => {
+  const reqId = buildRequestId();
+  const accountsCount = extractAccountsCount(req.rawBody);
+  const bodyBytes = (req.rawBody || '').length;
+
+  console.log(`📬 [webhook] reqId=${reqId} event received accounts=${accountsCount} bodyBytes=${bodyBytes}`);
+
   try {
     verifyDropboxSignature(req);
-    // Respond quickly; do processing after ACK
-    res.sendStatus(200);
-
-    // Kick processing (delta cursor)
-    await processDropboxDelta();
   } catch (err) {
-    // Dropbox expects 2xx normally; but signature failures should be 401/403
+    console.error(`❌ [webhook] reqId=${reqId} signature rejected error="${formatError(err)}"`);
     res.status(403).send('Forbidden');
+    return;
   }
+
+  // Respond quickly; do processing after ACK
+  res.sendStatus(200);
+  console.log(`✅ [webhook] reqId=${reqId} signature accepted acknowledged=200`);
+
+  // Kick processing (delta cursor)
+  processDropboxDelta({ trigger: 'webhook', reqId })
+    .then(summary => {
+      console.log(`✅ [webhook] reqId=${reqId} processing complete scanned=${summary.scannedFiles} enqueued=${summary.enqueuedJobs} ok=${summary.succeededJobs} failed=${summary.failedJobs} durationMs=${summary.durationMs}`);
+    })
+    .catch(err => {
+      console.error(`❌ [webhook] reqId=${reqId} processing failed error="${formatError(err)}"`);
+    });
 });
 
 // Manual trigger (optional)
 app.post('/run', express.json(), async (req, res) => {
-  await processDropboxDelta();
-  res.json({ ok: true });
+  const reqId = buildRequestId();
+  console.log(`▶️ [manual] reqId=${reqId} trigger received`);
+
+  try {
+    const summary = await processDropboxDelta({ trigger: 'manual', reqId });
+    res.json({ ok: true, reqId, summary });
+    console.log(`✅ [manual] reqId=${reqId} complete scanned=${summary.scannedFiles} enqueued=${summary.enqueuedJobs} ok=${summary.succeededJobs} failed=${summary.failedJobs} durationMs=${summary.durationMs}`);
+  } catch (err) {
+    console.error(`❌ [manual] reqId=${reqId} failed error="${formatError(err)}"`);
+    res.status(500).json({ ok: false, reqId, error: 'Processing failed' });
+  }
 });
 
 // Healthcheck
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-app.listen(process.env.PORT || 3000, async () => {
-  // Optional: validate tokens on boot
-  const dbx = getDropboxClient();
-  await dbx.usersGetCurrentAccount();
-  console.log(`Server running on :${process.env.PORT || 3000}`);
+const port = process.env.PORT || 3000;
+app.listen(port, async () => {
+  try {
+    // Optional: validate tokens on boot
+    const dbx = getDropboxClient();
+    const account = await dbx.usersGetCurrentAccount();
+    const email = account?.result?.email || 'unknown';
+    console.log(`🔐 [startup] connected dropboxAccount=${oneLine(email)}`);
+    console.log(`🚀 [startup] server running port=${port}`);
+  } catch (err) {
+    console.error(`❌ [startup] bootstrap failed error="${formatError(err)}"`);
+    process.exit(1);
+  }
 });
 
 function verifyDropboxSignature(req) {
@@ -68,4 +104,26 @@ function verifyDropboxSignature(req) {
     .digest('hex');
 
   if (computed !== signature) throw new Error('Invalid webhook signature');
+}
+
+function buildRequestId() {
+  return `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
+}
+
+function extractAccountsCount(rawBody) {
+  try {
+    const payload = JSON.parse(rawBody || '{}');
+    return payload?.list_folder?.accounts?.length ?? 0;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function formatError(err) {
+  if (err instanceof Error) return oneLine(`${err.name}: ${err.message}`);
+  return oneLine(String(err));
+}
+
+function oneLine(value) {
+  return String(value).replace(/\s+/g, ' ').trim();
 }
