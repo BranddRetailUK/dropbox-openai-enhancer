@@ -36,7 +36,7 @@ Optional (recommended):
 - `DROPBOX_INPUT_PATH` (default: `/INPUT`)
 - `DROPBOX_OUTPUT_PATH` (default: `/OUTPUT`)
 - `CONCURRENCY` (default: `4`)
-- `OUTPUT_FORMAT` (default: `png`)
+- `OUTPUT_FORMAT` (default: `png`, used for output filename extension)
 - `OUTPUT_SUFFIX` (default: `_ENHANCED`)
 
 Notes:

@@ -14,8 +14,7 @@ export async function editImageWithOpenAI(inputBuffer, inputFilename = 'input.pn
   const res = await client.images.edit({
     model: 'gpt-image-1.5',
     image: file,
-    prompt: PROMPT,
-    output_format: process.env.OUTPUT_FORMAT || 'png'
+    prompt: PROMPT
   });
 
   // GPT image models usually return base64 by default
